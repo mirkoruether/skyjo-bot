@@ -27,9 +27,6 @@ START_CARD_DECK = list(itertools.chain.from_iterable([
     [12] * 10,
 ]))
 
-class IllegalGameAction(RuntimeError):
-    pass
-
 class CardStatus:
     HIDDEN = 0
     REVEALED = 1
@@ -50,11 +47,11 @@ class Player(abc.ABC):
         return random.randint(0, 11), random.randint(0, 11)
 
     @abc.abstractmethod
-    def choose_draw_from_discarded(self, cgi:CurrentGameInfo) -> bool:
+    def choose_draw_from_discarded(self, cgi:CurrentGameInfo, playeridx:int) -> bool:
         pass
 
     @abc.abstractmethod
-    def choose_action(self, cgi:CurrentGameInfo, card:int) -> typing.Tuple[bool, int]:
+    def choose_action(self, cgi:CurrentGameInfo, playeridx:int, card:int) -> typing.Tuple[bool, int]:
         pass
 
 class Game:
@@ -86,12 +83,12 @@ class Game:
         turncnt = 500
         finishing_playeridx = None
 
-        while turnno <= turncnt:
+        while turnno < turncnt:
             gameinfo = self.calculate_game_info()
             player = self._players[playeridx]
 
             # Choose between drawing a new card or taking the top discarded one
-            if player.choose_draw_from_discarded():
+            if player.choose_draw_from_discarded(gameinfo, playeridx):
                 card = self._topdiscard
                 self._topdiscard = None
             else:
@@ -100,13 +97,14 @@ class Game:
             # Choose an action
             valid_action = False
             while not valid_action:
-                swap, cardidx = player.choose_action(gameinfo, card)
+                swap, cardidx = player.choose_action(gameinfo, playeridx, card)
                 valid_action = self.validate_action(playeridx, swap, cardidx)
 
             # Apply action
             if swap:
                 old_card = self._player_card_value[playeridx, cardidx]
                 self._player_card_value[playeridx, cardidx] = card
+                self._player_card_status[playeridx, cardidx] = CardStatus.REVEALED
                 self.discard(old_card)
             else:
                 self._player_card_status[playeridx, cardidx] = CardStatus.REVEALED
@@ -201,11 +199,3 @@ class Game:
             return False
 
         return True
-
-
-
-
-
-
-
-
