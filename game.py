@@ -35,14 +35,20 @@ class CardStatus:
     GONE = 2
 
 class CurrentGameInfo:
+    _playercnt:int = None
     _values:np.ndarray = None
     _status:np.ndarray = None
-    _open:int = None
+    _topdis:int = None
+    _turnno:int = None
+    _finishing:bool = None
 
-    def __init__(self, values, status, topdis) -> None:
+    def __init__(self, playercnt, values, status, topdis, turnno, finishing) -> None:
+        self._playercnt = playercnt
         self._values = values
         self._status = status
         self._topdis = topdis
+        self._turnno = turnno
+        self._finishing = finishing
 
 class GameCore(abc.ABC):
     _player_count : int = None
@@ -235,9 +241,12 @@ class GameCore(abc.ABC):
 
     def calculate_game_info(self) -> CurrentGameInfo:
         return CurrentGameInfo(
+            playercnt=self._player_count,
             values=np.where(self._player_card_status == CardStatus.REVEALED, self._player_card_value, 0),
             status=self._player_card_status,
-            topdis=self._topdiscard 
+            topdis=self._topdiscard,
+            turnno=self._turnno,
+            finishing=self.check_round_finished(),
         )
 
     def draw(self):
