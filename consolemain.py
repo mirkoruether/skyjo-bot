@@ -34,5 +34,5 @@ class ConsolePlayer(game.Player):
 
 if __name__ == '__main__':
     p = ConsolePlayer()
-    g = game.GamePlayers([p])
+    g = game.Game([p])
     print(g.play_game())

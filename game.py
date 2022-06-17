@@ -77,7 +77,7 @@ class GameCore(abc.ABC):
     def play_game(self) -> np.ndarray:
         while not self.play_step():
             pass
-        return self._round_results.sum(axis=1)
+        return self._round_results.sum(axis=0)
 
     def play_step(self) -> bool:
         if self._turnno is None:
@@ -265,11 +265,24 @@ class GameCore(abc.ABC):
 
         return True
 
-class Player(abc.ABC):
+class PlayerCore(abc.ABC):
     _playeridx = None
 
     def set_playeridx(self, playeridx):
         self._playeridx = playeridx
+    
+    @abc.abstractmethod
+    def action(self, valid: np.ndarray, cgi:CurrentGameInfo, card:int) -> int:
+        pass
+
+class Player(PlayerCore, abc.ABC):
+    def action(self, valid: np.ndarray, cgi: CurrentGameInfo, card: int) -> int:
+        if valid[0] > 0.5:
+            take = self.choose_take_discarded(cgi)
+            return 1 if take else 0
+        
+        swap, cardidx = self.choose_action(cgi, card)
+        return cardidx + (2 if swap else 14)
 
     @abc.abstractmethod
     def choose_take_discarded(self, cgi:CurrentGameInfo) -> bool:
@@ -279,7 +292,7 @@ class Player(abc.ABC):
     def choose_action(self, cgi:CurrentGameInfo, card:int) -> typing.Tuple[bool, int]:
         pass
 
-class GamePlayers(GameCore):
+class Game(GameCore):
     _players : typing.List[Player] = None
 
     def __init__(self, players) -> None:
@@ -290,10 +303,23 @@ class GamePlayers(GameCore):
             p.set_playeridx(i)
 
     def action(self) -> int:
-        p = self._players[self._active_playeridx]
-        if self._active_card is None:
-            take = p.choose_take_discarded(self.calculate_game_info())
-            return 1 if take else 0
-        
-        swap, cardidx = p.choose_action(self.calculate_game_info(), self._active_card)
-        return cardidx + (2 if swap else 14)
+        return self._players[self._active_playeridx].action(
+            self.calculate_valid_options(),
+            self.calculate_game_info(),
+            self._active_card
+        )
+
+class RandomPlayer(PlayerCore):
+    def action(self, valid: np.ndarray, cgi: CurrentGameInfo, card: int) -> int:
+        return (np.random.rand(26) * valid).argmax()
+
+if __name__ == '__main__':
+    for i in range(100):
+        p1 = RandomPlayer()
+        p2 = RandomPlayer()
+        p3 = RandomPlayer()
+
+        g = Game([p1, p2, p3])
+        final_result = g.play_game()
+        print(final_result)
+        print(g._round_results)
