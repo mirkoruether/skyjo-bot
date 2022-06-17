@@ -2,7 +2,6 @@
 SKYJO game
 """
 
-from calendar import c
 import itertools
 import random
 import typing
@@ -27,6 +26,9 @@ START_CARD_DECK = list(itertools.chain.from_iterable([
     [12] * 10,
 ]))
 
+class IllegalActionError(RuntimeError):
+    pass
+
 class CardStatus:
     HIDDEN = 0
     REVEALED = 1
@@ -42,106 +44,168 @@ class CurrentGameInfo:
         self._status = status
         self._topdis = topdis
 
-class Player(abc.ABC):
-    def reveal_two(self, cgi:CurrentGameInfo) -> typing.Tuple[int, int]:
-        return random.randint(0, 11), random.randint(0, 11)
+class GameCore(abc.ABC):
+    _player_count : int = None
 
-    @abc.abstractmethod
-    def choose_draw_from_discarded(self, cgi:CurrentGameInfo, playeridx:int) -> bool:
-        pass
-
-    @abc.abstractmethod
-    def choose_action(self, cgi:CurrentGameInfo, playeridx:int, card:int) -> typing.Tuple[bool, int]:
-        pass
-
-class Game:
     _deck : typing.List[int] = None
     _discarded : typing.List[int] = None
     _topdiscard : int = None
     _player_card_value : np.ndarray = None
     _player_card_status : np.ndarray = None
 
-    _players : typing.List[Player] = None
+    _active_card : int = None
+    _active_playeridx : int = None
+    _finishing_playeridx = None
 
-    def __init__(self, players) -> None:
-        self._players = players
+    _turnno : int = None
+    _turncnt : int = None
 
-    def play_round(self) -> np.ndarray:
-        self.init_next_round()
+    _roundno : int = 0
+    _round_results : np.ndarray = None
+
+    def __init__(self, player_count) -> None:
+        self._player_count = player_count
+
+    @abc.abstractmethod
+    def action(self) -> int:
+        # 0 = Draw card
+        # 1 = Take card
+        # 2-13 =  Swap card with (X-2)
+        # 14-25 = Discard card, reveal (X-14)
+        pass
+
+    def play_game(self) -> np.ndarray:
+        while not self.play_step():
+            pass
+        return self._round_results.sum(axis=1)
+
+    def play_step(self) -> bool:
+        if self._turnno is None:
+            self.init_next_round()
+            self._turnno = 0
+            self._turncnt = self._player_count * 100
+            self._finishing_playeridx = None
+
+        if self._active_playeridx is None:
+            self.determine_start_player()
+
+        if self._active_card is None:
+            self.play_step_draw()
+            return False
+        
+        self.play_step_action()
+
+        if self._turnno < self._turncnt:
+            return False
+
+        self.conclude_round()
+        self._turnno = None
+        self._roundno = self._roundno + 1
+
+        return self._round_results.sum(axis=0).max() >= 100 or self._roundno >= 20
+
+    def calculate_valid_options(self) -> np.ndarray:
+        result = np.zeros((26, ))
+        if self._active_card is None:
+            result[0:2] = 1
+            return result
+
+        # Swap is allowed where card is not gone
+        result[2:14] = np.where(self._player_card_status[self._active_playeridx, :] != CardStatus.GONE, 1.0, 0.0)
+
+        # Reveal is allowed where card is hidden
+        result[14:26] = np.where(self._player_card_status[self._active_playeridx, :] == CardStatus.HIDDEN, 1.0, 0.0)
+
+        return result
+
+    def play_step_draw(self) -> None:
+        # Choose between drawing a new card or taking the top discarded one
+        a = self.action()
+        if a == 0: # Draw
+            self._active_card = self.draw()
+        elif a == 1: # Take
+            self._active_card = self._topdiscard
+            self._topdiscard = None
+        else:
+            raise IllegalActionError
+
+    def play_step_action(self) -> None:
+        playeridx = self._active_playeridx
+
+        a = self.action()
+
+        if a < 2 or a >= 26:
+            raise IllegalActionError
+
+        swap = a < 14
+        cardidx = (a-2) % 12
+
+        if not self.validate_action(playeridx, swap, cardidx):
+            raise IllegalActionError
+
+        # Apply action
+        if swap:
+            old_card = self._player_card_value[playeridx, cardidx]
+            self._player_card_value[playeridx, cardidx] = self._active_card
+            self._player_card_status[playeridx, cardidx] = CardStatus.REVEALED
+            self.discard(old_card)
+        else:
+            self._player_card_status[playeridx, cardidx] = CardStatus.REVEALED
+            self.discard(self._active_card)
+        
+        self._active_card = None
+
+        # Check if triplet is present
+        # If yes, set status to "gone", value to "0" and discard
+        self.check_and_handle_triplets(playeridx)
+
+        # Check if the game is finished (and was not finished before)
+        # If yes the other players only get one more turn
+        if self._finishing_playeridx is None and self.check_round_finished():
+            self._finishing_playeridx = playeridx
+            self._turncnt = self._turnno + self._player_count
+
+        self._turnno = self._turnno + 1
+        self._active_playeridx = (playeridx + 1) % self._player_count
+
+    def determine_start_player(self):
+        # Reveal two cards for each player
+        # ToDo: Let players decide
+        for i in range(self._player_count):
+            self._player_card_status[i, 4] = CardStatus.REVEALED
+            self._player_card_status[i, 7] = CardStatus.REVEALED
+
         gameinfo = self.calculate_game_info()
-
-        # Players each reveal two cards
-        for i, p in enumerate(self._players):
-            j1, j2 = p.reveal_two(gameinfo)
-            self._player_card_status[i, j1] = CardStatus.REVEALED
-            self._player_card_status[i, j2] = CardStatus.REVEALED
-
         # Player with the highest revealed sum starts
-        gameinfo = self.calculate_game_info()
-        playeridx = gameinfo._values.sum(axis=1).argmax()
-        turnno = 0
-        turncnt = 500
-        finishing_playeridx = None
+        # ToDo: If sum is equal, keep revealing cards
+        self._active_playeridx = gameinfo._values.sum(axis=1).argmax()
 
-        while turnno < turncnt:
-            gameinfo = self.calculate_game_info()
-            player = self._players[playeridx]
-
-            # Choose between drawing a new card or taking the top discarded one
-            if player.choose_draw_from_discarded(gameinfo, playeridx):
-                card = self._topdiscard
-                self._topdiscard = None
-            else:
-                card = self.draw()
-
-            # Choose an action
-            valid_action = False
-            while not valid_action:
-                swap, cardidx = player.choose_action(gameinfo, playeridx, card)
-                valid_action = self.validate_action(playeridx, swap, cardidx)
-
-            # Apply action
-            if swap:
-                old_card = self._player_card_value[playeridx, cardidx]
-                self._player_card_value[playeridx, cardidx] = card
-                self._player_card_status[playeridx, cardidx] = CardStatus.REVEALED
-                self.discard(old_card)
-            else:
-                self._player_card_status[playeridx, cardidx] = CardStatus.REVEALED
-                self.discard(card)
-
-            # Check if triplet is present
-            # If yes, set status to "gone", value to "0" and discard
-            self.check_and_handle_triplets(playeridx)
-
-            # Check if the game is finished (and was not finished before)
-            # If yes the other players only get one more turn
-            if finishing_playeridx is None and self.check_game_finished():
-                finishing_playeridx = playeridx
-                turncnt = turnno + len(self._players)
-
-            turnno = turnno + 1
-            playeridx = (playeridx + 1) % len(self._players)
-        # end while 
-
-        # Conclude game
+    def conclude_round(self):
+        # Reveal all hidden cards
         self._player_card_status = np.where(
             self._player_card_status == CardStatus.HIDDEN,
             CardStatus.REVEALED,
             self._player_card_status,
         )
 
+        # Check for triplets one last time
         for i in range(len(self._players)):
             self.check_and_handle_triplets(i)
 
         final_values = self._player_card_value.sum(axis=1)
-        if finishing_playeridx is not None:
-            if final_values[finishing_playeridx] > final_values.min(): # ToDo: It's also x2 if a second player has equal score
-                final_values[finishing_playeridx] = 2 * final_values[finishing_playeridx]
 
-        return final_values
+        if self._finishing_playeridx is not None:
+            # If finishing player does not have the lowest score, score is doubled
+            # ToDo: It's also x2 if a second player has equal score. Also it is not x2 if score is negative
+            if final_values[self._finishing_playeridx] > final_values.min():
+                final_values[self._finishing_playeridx] = 2 * final_values[self._finishing_playeridx]
 
-    def init_next_round(self):
+        if self._round_results is None:
+            self._round_results = np.array([final_values])
+        else:
+            self._round_results = np.vstack((self._round_results, final_values))
+
+    def init_next_round(self) -> None:
         self._discarded = []
         self._player_card_value = np.zeros((len(self._players), 12))
         self._player_card_status = np.zeros((len(self._players), 12))
@@ -155,9 +219,7 @@ class Game:
 
         self._topdiscard = self.draw()
 
-        return
-
-    def check_game_finished(self) -> bool:
+    def check_round_finished(self) -> bool:
         return (self._player_card_status != CardStatus.HIDDEN).all(axis=1).any()
 
     def check_and_handle_triplets(self, playeridx) -> None:
@@ -192,6 +254,9 @@ class Game:
         self._topdiscard = card
 
     def validate_action(self, playeridx:int, swap:bool, cardidx:int) -> bool:
+        if cardidx < 0 or cardidx > 11:
+            return False
+
         if swap and self._player_card_status[playeridx, cardidx] == CardStatus.GONE:
             return False
 
@@ -199,3 +264,36 @@ class Game:
             return False
 
         return True
+
+class Player(abc.ABC):
+    _playeridx = None
+
+    def set_playeridx(self, playeridx):
+        self._playeridx = playeridx
+
+    @abc.abstractmethod
+    def choose_take_discarded(self, cgi:CurrentGameInfo) -> bool:
+        pass
+
+    @abc.abstractmethod
+    def choose_action(self, cgi:CurrentGameInfo, card:int) -> typing.Tuple[bool, int]:
+        pass
+
+class GamePlayers(GameCore):
+    _players : typing.List[Player] = None
+
+    def __init__(self, players) -> None:
+        super().__init__(len(players))
+        self._players = players
+
+        for i, p in enumerate(self._players):
+            p.set_playeridx(i)
+
+    def action(self) -> int:
+        p = self._players[self._active_playeridx]
+        if self._active_card is None:
+            take = p.choose_take_discarded(self.calculate_game_info())
+            return 1 if take else 0
+        
+        swap, cardidx = p.choose_action(self.calculate_game_info(), self._active_card)
+        return cardidx + (2 if swap else 14)
