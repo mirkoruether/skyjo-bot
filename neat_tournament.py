@@ -2,9 +2,12 @@
 SKYJO tournamanet by NEAT algorithm
 """
 
+import math
 import os
-import neat
+import typing
 
+import neat
+import tqdm
 import numpy as np
 
 import game
@@ -17,10 +20,10 @@ def normalize_card_status(status):
     return status / 2.0
 
 class NeatPlayer(game.PlayerCore):
-    _net: neat.FeedForwardNetwork = None
+    _net: neat.nn.FeedForwardNetwork = None
     _gid = None
 
-    def __init__(self, net: neat.FeedForwardNetwork, gid=None) -> None:
+    def __init__(self, net: neat.nn.FeedForwardNetwork, gid=None) -> None:
         super().__init__()
         self._net = net
         self._gid = gid
@@ -55,28 +58,72 @@ class NeatPlayer(game.PlayerCore):
 
         return result
 
-def eval_genomes(genomes, config):
-    players = [NeatPlayer(neat.nn.FeedForwardNetwork.create(genome, config), gid) for gid, genome in genomes]
+class NeatTournament:
+    _players: typing.List[NeatPlayer] = None
+    _best_player: NeatPlayer = None
+    _best_fitness: float = 0.0
 
-    for gid, genome in genomes:
-        genome.fitness = 1.0
+    def eval_pairing(self, pairing):
+        p1idx, p2idx = pairing
+        g = game.Game([self._players[p1idx], self._players[p2idx]])
+        results = g.play_game()
+        return (p1idx, p2idx)[results.argmin()]
 
-    # Tournament goes here
+    def eval_genomes(self, genomes, config):
+        self._players = [NeatPlayer(neat.nn.FeedForwardNetwork.create(genome, config), gid) for gid, genome in genomes]
 
-def run(config_file):
-    config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
-                         neat.DefaultSpeciesSet, neat.DefaultStagnation,
-                         config_file)
+        ranking = [1.0] * len(self._players)
+        rounds = int(math.log2(len(genomes)))
 
-    p = neat.Population(config)
+        active_playeridx = list(range(int(math.pow(2.0, rounds))))
 
-    p.add_reporter(neat.StdOutReporter(True))
-    stats = neat.StatisticsReporter()
-    p.add_reporter(stats)
-    p.add_reporter(neat.Checkpointer(5))
+        with tqdm.tqdm(total=128+64+32+16+8+4+2+1) as pbar:
+            for r in reversed(range(rounds)):
+                pairings = []
+                for x in range(int(math.pow(2.0, r))):
+                    pairings.append((active_playeridx.pop(), active_playeridx.pop()))
+                active_playeridx = []
 
-    winner = p.run(eval_genomes, 300)
-    print('\nBest genome:\n{!s}'.format(winner))
+                # ToDo: Parallel
+                for pairing in pairings:
+                    winneridx = self.eval_pairing(pairing)
+                    pbar.update(1.0)
+                    ranking[winneridx] += 1.0
+                    active_playeridx.append(winneridx)
+
+        final_winneridx = active_playeridx.pop()
+
+        offset = 0.0
+        if self._best_player is None:
+            self._best_player = self._players[final_winneridx]
+            self._best_fitness = ranking[final_winneridx]
+        else:
+            # Winners plays against the last generation's winner
+            g = game.Game([self._best_player, self._players[final_winneridx]])
+            if g.play_game().argmin() == 0: # Old winner wins
+                offset = self._best_fitness - ranking[final_winneridx] - 1.0
+            else: # New winner wins
+                offset = self._best_fitness - ranking[final_winneridx] + 1.0
+                self._best_player = self._players[final_winneridx]
+                self._best_fitness = ranking[final_winneridx] + offset
+
+        for (i, (gid, genome)) in enumerate(genomes):
+            genome.fitness = ranking[i] + offset
+
+    def run(self, config_file):
+        config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
+                            neat.DefaultSpeciesSet, neat.DefaultStagnation,
+                            config_file)
+
+        p = neat.Population(config)
+
+        p.add_reporter(neat.StdOutReporter(True))
+        stats = neat.StatisticsReporter()
+        p.add_reporter(stats)
+        p.add_reporter(neat.Checkpointer(5))
+
+        winner = p.run(self.eval_genomes, 100)
+        print('\nBest genome:\n{!s}'.format(winner))
 
 if __name__ == '__main__':
     # Determine path to configuration file. This path manipulation is
@@ -84,5 +131,5 @@ if __name__ == '__main__':
     # current working directory.
     local_dir = os.path.dirname(__file__)
     config_path = os.path.join(local_dir, 'neat-config')
-    run(config_path)
+    NeatTournament().run(config_path)
 
