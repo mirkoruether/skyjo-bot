@@ -4,6 +4,7 @@ SKYJO tournamanet by NEAT algorithm
 
 import math
 import os
+import random
 import typing
 import concurrent.futures as cf
 
@@ -13,6 +14,7 @@ import numpy as np
 
 import game
 
+PARALLEL = True
 
 def normalize_card_values(values):
     return (values + 2.0) / 14.0
@@ -36,7 +38,7 @@ class NeatPlayer(game.PlayerCore):
             raise RuntimeError("1v1 me, noob!")
 
         xi = self.build_input(cgi, card)
-        xo = self._net.activate(xi)
+        xo = np.array(self._net.activate(xi)) + 2.0 # +1 for activation functions returning [-1, 1]
 
         return (np.array(xo) * valid).argmax()
 
@@ -61,6 +63,16 @@ class NeatPlayer(game.PlayerCore):
 
         return result
 
+def eval_parallel(exc, pbar, func, iterables, update_step=1):
+    futures = []
+
+    for it in iterables:
+        future = exc.submit(func, it)
+        future.add_done_callback(lambda p: pbar.update(update_step))
+        futures.append(future)
+
+    for future in futures:
+        yield future.result()
 
 class NeatTournament:
     _players: typing.List[NeatPlayer] = None
@@ -83,6 +95,7 @@ class NeatTournament:
         rounds = int(math.log2(len(genomes)))
 
         active_playeridx = list(range(2**rounds))
+        random.shuffle(active_playeridx)
 
         with (
             cf.ProcessPoolExecutor(os.cpu_count()) as exc,
@@ -94,16 +107,15 @@ class NeatTournament:
                     pairings.append((active_playeridx.pop(), active_playeridx.pop()))
                 active_playeridx = []
 
-                futures = []
+                if PARALLEL:
+                    winneridxs = eval_parallel(exc, pbar, self.eval_pairing, pairings)
+                else:
+                    def func(x):
+                        self.eval_pairing(x)
+                        pbar.update(1)
+                    winneridxs = [func(x) for x in pairings]
 
-                for pairing in pairings:
-                    future = exc.submit(self.eval_pairing, pairing)
-                    future.add_done_callback(lambda p: pbar.update(1))
-                    futures.append(future)
-
-                # ToDo: Parallel
-                for future in futures:
-                    winneridx = future.result()
+                for winneridx in winneridxs:
                     ranking[winneridx] += 1.0
                     active_playeridx.append(winneridx)
 
