@@ -8,39 +8,46 @@ import typing
 import abc
 import numpy as np
 
-START_CARD_DECK = list(itertools.chain.from_iterable([
-    [-2] * 5,
-    [ 0] * 15,
-    [-1] * 10,
-    [ 1] * 10,
-    [ 2] * 10,
-    [ 3] * 10,
-    [ 4] * 10,
-    [ 5] * 10,
-    [ 6] * 10,
-    [ 7] * 10,
-    [ 8] * 10,
-    [ 9] * 10,
-    [10] * 10,
-    [11] * 10,
-    [12] * 10,
-]))
+START_CARD_DECK = list(
+    itertools.chain.from_iterable(
+        [
+            [-2] * 5,
+            [0] * 15,
+            [-1] * 10,
+            [1] * 10,
+            [2] * 10,
+            [3] * 10,
+            [4] * 10,
+            [5] * 10,
+            [6] * 10,
+            [7] * 10,
+            [8] * 10,
+            [9] * 10,
+            [10] * 10,
+            [11] * 10,
+            [12] * 10,
+        ]
+    )
+)
+
 
 class IllegalActionError(RuntimeError):
     pass
+
 
 class CardStatus:
     HIDDEN = 0
     REVEALED = 1
     GONE = 2
 
+
 class CurrentGameInfo:
-    playercnt:int = None
-    values:np.ndarray = None
-    status:np.ndarray = None
-    topdis:int = None
-    turnno:int = None
-    finishing:bool = None
+    playercnt: int = None
+    values: np.ndarray = None
+    status: np.ndarray = None
+    topdis: int = None
+    turnno: int = None
+    finishing: bool = None
 
     def __init__(self, playercnt, values, status, topdis, turnno, finishing) -> None:
         self.playercnt = playercnt
@@ -50,24 +57,25 @@ class CurrentGameInfo:
         self.turnno = turnno
         self.finishing = finishing
 
+
 class GameCore(abc.ABC):
-    _player_count : int = None
+    _player_count: int = None
 
-    _deck : typing.List[int] = None
-    _discarded : typing.List[int] = None
-    _topdiscard : int = None
-    _player_card_value : np.ndarray = None
-    _player_card_status : np.ndarray = None
+    _deck: typing.List[int] = None
+    _discarded: typing.List[int] = None
+    _topdiscard: int = None
+    _player_card_value: np.ndarray = None
+    _player_card_status: np.ndarray = None
 
-    _active_card : int = None
-    _active_playeridx : int = None
+    _active_card: int = None
+    _active_playeridx: int = None
     _finishing_playeridx = None
 
-    _turnno : int = None
-    _turncnt : int = None
+    _turnno: int = None
+    _turncnt: int = None
 
-    _roundno : int = 0
-    _round_results : np.ndarray = None
+    _roundno: int = 0
+    _round_results: np.ndarray = None
 
     def __init__(self, player_count) -> None:
         self._player_count = player_count
@@ -111,25 +119,33 @@ class GameCore(abc.ABC):
         return self._round_results.sum(axis=0).max() >= 100 or self._roundno >= 20
 
     def calculate_valid_options(self) -> np.ndarray:
-        result = np.zeros((26, ))
+        result = np.zeros((26,))
         if self._active_card is None:
             result[0:2] = 1
             return result
 
         # Swap is allowed where card is not gone
-        result[2:14] = np.where(self._player_card_status[self._active_playeridx, :] != CardStatus.GONE, 1.0, 0.0)
+        result[2:14] = np.where(
+            self._player_card_status[self._active_playeridx, :] != CardStatus.GONE,
+            1.0,
+            0.0,
+        )
 
         # Reveal is allowed where card is hidden
-        result[14:26] = np.where(self._player_card_status[self._active_playeridx, :] == CardStatus.HIDDEN, 1.0, 0.0)
+        result[14:26] = np.where(
+            self._player_card_status[self._active_playeridx, :] == CardStatus.HIDDEN,
+            1.0,
+            0.0,
+        )
 
         return result
 
     def play_step_draw(self) -> None:
         # Choose between drawing a new card or taking the top discarded one
         a = self.action()
-        if a == 0: # Draw
+        if a == 0:  # Draw
             self._active_card = self.draw()
-        elif a == 1: # Take
+        elif a == 1:  # Take
             self._active_card = self._topdiscard
             self._topdiscard = None
         else:
@@ -144,7 +160,7 @@ class GameCore(abc.ABC):
             raise IllegalActionError
 
         swap = a < 14
-        cardidx = (a-2) % 12
+        cardidx = (a - 2) % 12
 
         if not self.validate_action(playeridx, swap, cardidx):
             raise IllegalActionError
@@ -204,7 +220,9 @@ class GameCore(abc.ABC):
             # If finishing player does not have the lowest score, score is doubled
             # ToDo: It's also x2 if a second player has equal score. Also it is not x2 if score is negative
             if final_values[self._finishing_playeridx] > final_values.min():
-                final_values[self._finishing_playeridx] = 2 * final_values[self._finishing_playeridx]
+                final_values[self._finishing_playeridx] = (
+                    2 * final_values[self._finishing_playeridx]
+                )
 
         if self._round_results is None:
             self._round_results = np.array([final_values])
@@ -230,19 +248,28 @@ class GameCore(abc.ABC):
 
     def check_and_handle_triplets(self, playeridx) -> None:
         for i in range(4):
-            if (self._player_card_status[playeridx, 3*i:3*(i+1)] == CardStatus.REVEALED).all()\
-                and (self._player_card_value[playeridx, 3*i:3*(i+1)] == self._player_card_value[playeridx, 3*i]).all():
+            rs = 3 * i  # Row start index (incl.)
+            re = 3 * (i + 1)  # Row end index (excl.)
+            triplet_card = self._player_card_value[playeridx, rs]
+            if (
+                self._player_card_status[playeridx, rs:re] == CardStatus.REVEALED
+            ).all() and (
+                self._player_card_value[playeridx, rs:re] == triplet_card
+            ).all():
 
-                triplet_card = self._player_card_value[playeridx, 3*i]
-                self._player_card_status[playeridx, 3*i:3*(i+1)] = CardStatus.GONE
-                self._player_card_value[playeridx, 3*i:3*(i+1)] = 0
+                self._player_card_status[playeridx, rs:re] = CardStatus.GONE
+                self._player_card_value[playeridx, rs:re] = 0
                 for i in range(3):
                     self.discard(triplet_card)
 
     def calculate_game_info(self) -> CurrentGameInfo:
         return CurrentGameInfo(
             playercnt=self._player_count,
-            values=np.where(self._player_card_status == CardStatus.REVEALED, self._player_card_value, 0),
+            values=np.where(
+                self._player_card_status == CardStatus.REVEALED,
+                self._player_card_value,
+                0,
+            ),
             status=self._player_card_status,
             topdis=self._topdiscard,
             turnno=self._turnno,
@@ -257,22 +284,26 @@ class GameCore(abc.ABC):
             random.shuffle(self._deck)
         return result
 
-    def discard(self, card:int):
+    def discard(self, card: int):
         if self._topdiscard is not None:
             self._discarded.append(self._topdiscard)
         self._topdiscard = card
 
-    def validate_action(self, playeridx:int, swap:bool, cardidx:int) -> bool:
+    def validate_action(self, playeridx: int, swap: bool, cardidx: int) -> bool:
         if cardidx < 0 or cardidx > 11:
             return False
 
         if swap and self._player_card_status[playeridx, cardidx] == CardStatus.GONE:
             return False
 
-        if not swap and self._player_card_status[playeridx, cardidx] != CardStatus.HIDDEN:
+        if (
+            not swap
+            and self._player_card_status[playeridx, cardidx] != CardStatus.HIDDEN
+        ):
             return False
 
         return True
+
 
 class PlayerCore(abc.ABC):
     _playeridx = None
@@ -281,8 +312,9 @@ class PlayerCore(abc.ABC):
         self._playeridx = playeridx
 
     @abc.abstractmethod
-    def action(self, valid: np.ndarray, cgi:CurrentGameInfo, card:int) -> int:
+    def action(self, valid: np.ndarray, cgi: CurrentGameInfo, card: int) -> int:
         pass
+
 
 class Player(PlayerCore, abc.ABC):
     def action(self, valid: np.ndarray, cgi: CurrentGameInfo, card: int) -> int:
@@ -294,15 +326,16 @@ class Player(PlayerCore, abc.ABC):
         return cardidx + (2 if swap else 14)
 
     @abc.abstractmethod
-    def choose_take_discarded(self, cgi:CurrentGameInfo) -> bool:
+    def choose_take_discarded(self, cgi: CurrentGameInfo) -> bool:
         pass
 
     @abc.abstractmethod
-    def choose_action(self, cgi:CurrentGameInfo, card:int) -> typing.Tuple[bool, int]:
+    def choose_action(self, cgi: CurrentGameInfo, card: int) -> typing.Tuple[bool, int]:
         pass
 
+
 class Game(GameCore):
-    _players : typing.List[Player] = None
+    _players: typing.List[Player] = None
 
     def __init__(self, players) -> None:
         super().__init__(len(players))
@@ -315,14 +348,16 @@ class Game(GameCore):
         return self._players[self._active_playeridx].action(
             self.calculate_valid_options(),
             self.calculate_game_info(),
-            self._active_card
+            self._active_card,
         )
+
 
 class RandomPlayer(PlayerCore):
     def action(self, valid: np.ndarray, cgi: CurrentGameInfo, card: int) -> int:
         return (np.random.rand(26) * valid).argmax()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     for gameno in range(100):
         p1 = RandomPlayer()
         p2 = RandomPlayer()

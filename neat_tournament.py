@@ -50,9 +50,7 @@ class NeatPlayer(game.PlayerCore):
         result[2] = 1.0 if card is not None else 0.0
         result[3] = normalize_card_values(card) if card is not None else 0.0
         result[4] = 1.0 if cgi.topdis is not None else 0.0
-        result[5] = (
-            normalize_card_values(cgi.topdis) if cgi.topdis is not None else 0.0
-        )
+        result[5] = normalize_card_values(cgi.topdis) if cgi.topdis is not None else 0.0
 
         result[6:18] = normalize_card_status(cgi.status[me, :])
         result[18:30] = normalize_card_values(cgi.values[me, :])
