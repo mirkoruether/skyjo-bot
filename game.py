@@ -35,20 +35,20 @@ class CardStatus:
     GONE = 2
 
 class CurrentGameInfo:
-    _playercnt:int = None
-    _values:np.ndarray = None
-    _status:np.ndarray = None
-    _topdis:int = None
-    _turnno:int = None
-    _finishing:bool = None
+    playercnt:int = None
+    values:np.ndarray = None
+    status:np.ndarray = None
+    topdis:int = None
+    turnno:int = None
+    finishing:bool = None
 
     def __init__(self, playercnt, values, status, topdis, turnno, finishing) -> None:
-        self._playercnt = playercnt
-        self._values = values
-        self._status = status
-        self._topdis = topdis
-        self._turnno = turnno
-        self._finishing = finishing
+        self.playercnt = playercnt
+        self.values = values
+        self.status = status
+        self.topdis = topdis
+        self.turnno = turnno
+        self.finishing = finishing
 
 class GameCore(abc.ABC):
     _player_count : int = None
@@ -98,7 +98,7 @@ class GameCore(abc.ABC):
         if self._active_card is None:
             self.play_step_draw()
             return False
-        
+
         self.play_step_action()
 
         if self._turnno < self._turncnt:
@@ -158,7 +158,7 @@ class GameCore(abc.ABC):
         else:
             self._player_card_status[playeridx, cardidx] = CardStatus.REVEALED
             self.discard(self._active_card)
-        
+
         self._active_card = None
 
         # Check if triplet is present
@@ -184,7 +184,7 @@ class GameCore(abc.ABC):
         gameinfo = self.calculate_game_info()
         # Player with the highest revealed sum starts
         # ToDo: If sum is equal, keep revealing cards
-        self._active_playeridx = gameinfo._values.sum(axis=1).argmax()
+        self._active_playeridx = gameinfo.values.sum(axis=1).argmax()
 
     def conclude_round(self):
         # Reveal all hidden cards
@@ -195,7 +195,7 @@ class GameCore(abc.ABC):
         )
 
         # Check for triplets one last time
-        for i in range(len(self._players)):
+        for i in range(self._player_count):
             self.check_and_handle_triplets(i)
 
         final_values = self._player_card_value.sum(axis=1)
@@ -213,13 +213,13 @@ class GameCore(abc.ABC):
 
     def init_next_round(self) -> None:
         self._discarded = []
-        self._player_card_value = np.zeros((len(self._players), 12))
-        self._player_card_status = np.zeros((len(self._players), 12))
+        self._player_card_value = np.zeros((self._player_count, 12))
+        self._player_card_status = np.zeros((self._player_count, 12))
 
         self._deck = START_CARD_DECK.copy()
         random.shuffle(self._deck)
 
-        for i in range(len(self._players)):
+        for i in range(self._player_count):
             for j in range(12):
                 self._player_card_value[i, j] = self.draw()
 
@@ -279,7 +279,7 @@ class PlayerCore(abc.ABC):
 
     def set_playeridx(self, playeridx):
         self._playeridx = playeridx
-    
+
     @abc.abstractmethod
     def action(self, valid: np.ndarray, cgi:CurrentGameInfo, card:int) -> int:
         pass
@@ -289,7 +289,7 @@ class Player(PlayerCore, abc.ABC):
         if valid[0] > 0.5:
             take = self.choose_take_discarded(cgi)
             return 1 if take else 0
-        
+
         swap, cardidx = self.choose_action(cgi, card)
         return cardidx + (2 if swap else 14)
 
@@ -323,7 +323,7 @@ class RandomPlayer(PlayerCore):
         return (np.random.rand(26) * valid).argmax()
 
 if __name__ == '__main__':
-    for i in range(100):
+    for gameno in range(100):
         p1 = RandomPlayer()
         p2 = RandomPlayer()
         p3 = RandomPlayer()
