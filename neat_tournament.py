@@ -5,6 +5,7 @@ SKYJO tournamanet by NEAT algorithm
 import math
 import os
 import typing
+import concurrent.futures as cf
 
 import neat
 import tqdm
@@ -81,19 +82,28 @@ class NeatTournament:
         ranking = [1.0] * len(self._players)
         rounds = int(math.log2(len(genomes)))
 
-        active_playeridx = list(range(int(math.pow(2.0, rounds))))
+        active_playeridx = list(range(2**rounds))
 
-        with tqdm.tqdm(total=128 + 64 + 32 + 16 + 8 + 4 + 2 + 1) as pbar:
+        with (
+            cf.ProcessPoolExecutor(os.cpu_count()) as exc,
+            tqdm.tqdm(total=(2**rounds) - 1) as pbar,
+        ):
             for r in reversed(range(rounds)):
                 pairings = []
                 for x in range(int(math.pow(2.0, r))):
                     pairings.append((active_playeridx.pop(), active_playeridx.pop()))
                 active_playeridx = []
 
-                # ToDo: Parallel
+                futures = []
+
                 for pairing in pairings:
-                    winneridx = self.eval_pairing(pairing)
-                    pbar.update(1.0)
+                    future = exc.submit(self.eval_pairing, pairing)
+                    future.add_done_callback(lambda p: pbar.update(1))
+                    futures.append(future)
+
+                # ToDo: Parallel
+                for future in futures:
+                    winneridx = future.result()
                     ranking[winneridx] += 1.0
                     active_playeridx.append(winneridx)
 
