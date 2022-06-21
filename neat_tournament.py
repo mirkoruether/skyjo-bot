@@ -2,6 +2,7 @@
 SKYJO tournamanet by NEAT algorithm
 """
 
+import abc
 import math
 import os
 import random
@@ -24,13 +25,12 @@ def normalize_card_status(status):
     return status / 2.0
 
 
-class NeatPlayer(game.PlayerCore):
-    _net: neat.nn.FeedForwardNetwork = None
-    _gid = None
+class NeatDuelist(game.PlayerCore, abc.ABC):
+    NUM_INPUT = 0
 
     def __init__(self, net: neat.nn.FeedForwardNetwork, gid=None) -> None:
         super().__init__()
-        self._net = net
+        self._net: neat.nn.FeedForwardNetwork = net
         self._gid = gid
 
     def action(self, valid: np.ndarray, cgi: game.CurrentGameInfo, card: int) -> int:
@@ -41,6 +41,13 @@ class NeatPlayer(game.PlayerCore):
         xo = np.array(self._net.activate(xi)) + 2.0 # +1 for activation functions returning [-1, 1]
 
         return (np.array(xo) * valid).argmax()
+
+    @abc.abstractmethod
+    def build_input(self, cgi: game.CurrentGameInfo, card: int) -> np.ndarray:
+        pass
+
+class NeatDuelist54(NeatDuelist):
+    NUM_INPUT = 54
 
     def build_input(self, cgi: game.CurrentGameInfo, card: int) -> np.ndarray:
         me = self._playeridx
@@ -75,9 +82,11 @@ def eval_parallel(exc, pbar, func, iterables, update_step=1):
         yield future.result()
 
 class NeatTournament:
-    _players: typing.List[NeatPlayer] = None
-    _best_player: NeatPlayer = None
-    _best_fitness: float = 0.0
+    def __init__(self, playertype: typing.Type[NeatDuelist] = NeatDuelist54) -> None:
+        self._playertype = playertype
+        self._players: typing.List[NeatDuelist] = None
+        self._best_player: NeatDuelist = None
+        self._best_fitness: float = 0.0
 
     def eval_pairing(self, pairing):
         p1idx, p2idx = pairing
@@ -87,7 +96,7 @@ class NeatTournament:
 
     def eval_genomes(self, genomes, config):
         self._players = [
-            NeatPlayer(neat.nn.FeedForwardNetwork.create(genome, config), gid)
+            self._playertype(neat.nn.FeedForwardNetwork.create(genome, config), gid)
             for gid, genome in genomes
         ]
 
@@ -147,6 +156,10 @@ class NeatTournament:
             config_file,
         )
 
+        # Enforce sizes of input and output layer
+        config.genome_config.num_inputs = self._playertype.NUM_INPUT
+        config.genome_config.num_outputs = 26
+
         p = neat.Population(config)
 
         p.add_reporter(neat.StdOutReporter(True))
@@ -161,4 +174,4 @@ class NeatTournament:
 if __name__ == "__main__":
     local_dir = os.path.dirname(__file__)
     config_path = os.path.join(local_dir, "neat-config")
-    NeatTournament().run(config_path)
+    NeatTournament(NeatDuelist54).run(config_path)

@@ -42,43 +42,34 @@ class CardStatus:
 
 
 class CurrentGameInfo:
-    playercnt: int = None
-    values: np.ndarray = None
-    status: np.ndarray = None
-    topdis: int = None
-    turnno: int = None
-    finishing: bool = None
-
     def __init__(self, playercnt, values, status, topdis, turnno, finishing) -> None:
-        self.playercnt = playercnt
-        self.values = values
-        self.status = status
-        self.topdis = topdis
-        self.turnno = turnno
-        self.finishing = finishing
+        self.playercnt: int = playercnt
+        self.values: np.ndarray = values
+        self.status: np.ndarray = status
+        self.topdis: int = topdis
+        self.turnno: int = turnno
+        self.finishing: bool = finishing
 
 
 class GameCore(abc.ABC):
-    _player_count: int = None
-
-    _deck: typing.List[int] = None
-    _discarded: typing.List[int] = None
-    _topdiscard: int = None
-    _player_card_value: np.ndarray = None
-    _player_card_status: np.ndarray = None
-
-    _active_card: int = None
-    _active_playeridx: int = None
-    _finishing_playeridx = None
-
-    _turnno: int = None
-    _turncnt: int = None
-
-    _roundno: int = 0
-    _round_results: np.ndarray = None
-
     def __init__(self, player_count) -> None:
         self._player_count = player_count
+
+        self._deck: typing.List[int] = None
+        self._discarded: typing.List[int] = None
+        self._topdiscard: int = None
+        self._player_card_value: np.ndarray = None
+        self._player_card_status: np.ndarray = None
+
+        self._active_card: int = None
+        self._active_playeridx: int = None
+        self._finishing_playeridx = None
+
+        self._turnno: int = None
+        self._turncnt: int = None
+
+        self._roundno: int = 0
+        self._round_results: np.ndarray = None
 
     @abc.abstractmethod
     def action(self) -> int:
@@ -306,7 +297,8 @@ class GameCore(abc.ABC):
 
 
 class PlayerCore(abc.ABC):
-    _playeridx = None
+    def __init__(self) -> None:
+        self._playeridx = None
 
     def set_playeridx(self, playeridx):
         self._playeridx = playeridx
@@ -335,11 +327,9 @@ class Player(PlayerCore, abc.ABC):
 
 
 class Game(GameCore):
-    _players: typing.List[Player] = None
-
-    def __init__(self, players) -> None:
+    def __init__(self, players: typing.List[Player]) -> None:
         super().__init__(len(players))
-        self._players = players
+        self._players: typing.List[Player] = players
 
         for i, p in enumerate(self._players):
             p.set_playeridx(i)
